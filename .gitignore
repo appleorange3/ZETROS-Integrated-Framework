@@ -1,0 +1,16 @@
+# Python junk
+__pycache__/
+*.pyc
+
+# Security Keys (CRITICAL)
+server_private.pem
+ca_keys.py # If it contains private keys
+*.pem
+
+# Local Databases/Vaults
+puf_database.json
+device_vault.json
+traffic_data.csv
+
+# Others
+.DS_Store
