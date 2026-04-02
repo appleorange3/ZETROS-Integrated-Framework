@@ -1,73 +1,108 @@
-🛡️ ZETROS: Zero-Trust IoT Security Framework
-PUF-Based Authentication | ML Trust Scoring | Blockchain Blacklisting
+# 🛡️ ZETROS: Zero-Trust IoT Security Framework
+### **PUF-Based Auth | ML Behavioral Guard | Blockchain Blacklisting**
 
-This repository contains the integrated ZETROS framework. It uses Physical Unclonable Functions (PUF) for hardware-bound authentication, Machine Learning for behavioral anomaly detection, and Blockchain for a distributed device blacklist.
+ZETROS is a multi-layered security framework designed to protect IoT networks. It moves beyond simple passwords by verifying the **physical DNA** of the hardware (PUF) and monitoring the **behavioral rhythm** of the traffic (ML).
 
-📂 Project Structure
-client_iot/: Our custom PUF-based device logic (Phase 1 & 2).
+---
 
-server_hub/: The central hub that handles registration and authentication.
+## 🏗️ System Architecture
 
-common/: Shared cryptographic and encoding utilities.
+* **Physical Layer:** Uses **Physical Unclonable Functions (PUF)** to generate unique, non-clonable hardware fingerprints.
+* **Network Layer:** Implements a **4-Step Handshake** with RSA-2048 encryption, AES-GCM session keys, and **Replay Protection** (Nonces + Timestamps).
+* **Intelligence Layer:** A **Random Forest IDS** trained on the **UNSW-NB15** dataset monitors traffic for DDoS, Flooding, and Anomalies.
+* **Trust Layer:** (In Progress) A **Blockchain-based Ledger** to permanently blacklist malicious device IDs.
 
-authority_ca/: Simulated Certificate Authority for MSG3/MSG4 verification.
+---
 
-ml/: (Friend A) Machine Learning models for trust scoring.
+## 📂 Project Structure
 
-server/ & client/: (Skeleton) Integration placeholders.
+* `client_iot/`: Device-side logic for Registration (Phase 1) and Connection (Phase 2).
+* `server_hub/`: The central "Bouncer." Handles authentication and runs the ML Watchdog.
+* `ml_sahil/`: **(Sahil's Module)** Contains `model.pkl`, `train.py`, and the feature extraction logic.
+* `authority_ca/`: Simulated Certificate Authority for verifying Hub identity.
+* `common/`: Shared cryptographic utilities (RSA, AES, XOR, Entropy).
+* `data_sahil/`: The "Evidence Locker" containing `traffic_data.csv` and `puf_database.json`.
 
-data/: Shared folder for traffic_data.csv (ML input) and databases.
+---
 
-🛠️ Prerequisites
-Ensure you have Python 3.10+ installed. Install the required cryptographic libraries:
+## 🛠️ Prerequisites & Setup
 
-Bash
-pip install cryptography
-🔑 Setup: Generating Security Keys
-Before running the system, you must generate your own RSA keys and CA certificates.
+1.  **Install Dependencies:**
+    ```bash
+    pip install cryptography pandas scikit-learn joblib numpy
+    ```
 
-Generate Server Keys:
-Run the key generator script inside server_hub:
+2.  **Generate Security Keys:**
+    You must generate a unique "Identity" for your Hub before starting.
+    ```bash
+    python3 -m server_hub.server_keys
+    ```
 
-Bash
-python3 -m server_hub.server_keys
-This will create server_private.pem and server_public.pem in your root directory.
+3.  **Train the ML Brain:**
+    Ensure the model is compatible with your local environment.
+    ```bash
+    python3 ml_sahil/train.py
+    ```
 
-CA Setup:
-Ensure authority_ca/ca_keys.py exists (this handles the MSG3/4 simulation).
+---
 
-🚀 Execution Flow
-1. Start the Hub (The Server)
-The Hub must be running to listen for registration and connection requests. It will also start logging traffic to traffic_data.csv for the ML module.
+## 🚀 Execution Flow
 
-Bash
+### **Step 1: Start the Hub**
+The Hub acts as the central gateway. It listens for devices and runs the ML behavioral analysis in the background.
+```bash
 python3 -m server_hub.hub
-2. Run the Device (Phase 1: Registration)
-If the device has never registered before (no device_vault.json exists), running this command will trigger the 9-step ZETROS registration.
+```
 
-Bash
+### **Step 2: Device Registration (Phase 1)**
+If a device is new, it must register its PUF fingerprint.
+```bash
 python3 -m client_iot.device
-Result: A device_vault.json is created locally, and the Hub saves the hardware fingerprint to puf_database.json.
+```
+*Result: `device_vault.json` is created on the device; hardware hash is stored in the Hub's DB.*
 
-3. Run the Device (Phase 2: Authentication)
-Run the same command again. The device will now detect the vault and perform a quick 4-step hardware-challenge handshake.
-
-Bash
+### **Step 3: Secure Connection (Phase 2)**
+Run the device again to perform the 4-step hardware-bound handshake.
+```bash
 python3 -m client_iot.device
-Result: You should see ✅ [AUTH SUCCESS] on the terminal if the PUF response matches the database.
+```
+*Result: Hub verifies the physical fingerprint. `✅ [AUTH SUCCESS]`*
 
-📊 Integration for Team Members
-🧠 ML Friend (Trust Scoring)
-The Hub automatically logs all inbound and outbound traffic to traffic_data.csv.
+---
 
-Task: Use ml/train.py to train on the provided dataset and ml/model.py to calculate trust scores based on the real-time CSV updates.
+## 🧪 Testing & Attack Simulation
 
-⛓️ Blockchain Friend (Blacklisting)
-The identity of every verified device is a UUID.
+### **The "Chaos Test" (DDoS Simulation)**
+To verify the ML Watchdog is working, run the chaos engine. It will attempt to flood the Hub with high-frequency requests.
+```bash
+python3 attack_chaos.py
+```
+**Expected Hub Output:**
+* `ATTACK PROB: 0.88+`
+* `🚨 [ML ALERT] Anomaly detected from 127.0.0.1! High probability of attack.`
 
-Task: Implement the web3.py logic in server/blockchain.py. The Hub will call your is_blacklisted(client_id) function before allowing a Phase 2 connection.
+### **Replay Protection Test**
+Attempting to send the same packet twice or sending a packet with an old timestamp will be caught by the Hub's Replay Gatekeeper.
+* **Result:** `🚫 [REPLAY] CONN1 blocked.`
 
-⚠️ Security Notes
-DO NOT push your .pem files or device_vault.json to GitHub. They are ignored by .gitignore.
+---
 
-If you get a Physical Fingerprint Mismatch, delete both puf_database.json and device_vault.json to perform a clean re-registration.
+## 📊 Feature Mapping (For ML Development)
+The Hub logs raw data to `traffic_data.csv`. The ML module aggregates these into **5 UNSW-NB15 features**:
+
+| Feature | Logic | Purpose |
+| :--- | :--- | :--- |
+| **Requests/Sec** | Packets over Window Time | Detects Flooding/DDoS |
+| **Avg Interval** | Time between packets | Detects scripted/bot behavior |
+| **Bytes/Sec** | Data volume over time | Detects data exfiltration |
+| **Avg Packet Size** | Total Bytes / Total Packets | Detects standard attack signatures |
+| **Packet Ratio** | Inbound vs Outbound | Detects scanning/one-way floods |
+
+---
+
+## ⚠️ Security Warning
+* **Vault Security:** `device_vault.json` contains your PUF seed. **Never share it.**
+* **Private Keys:** `server_private.pem` should never be pushed to GitHub (already in `.gitignore`).
+* **Database Reset:** If you change your RSA keys, delete `puf_database.json` and `device_vault.json` to start a clean registration.
+
+---
