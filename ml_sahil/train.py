@@ -1,18 +1,38 @@
+import os
 import pandas as pd
 import numpy as np
+import joblib
+
+# These are the imports Pylance was complaining about:
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import classification_report, accuracy_score
-import joblib
+from sklearn.metrics import accuracy_score
+
+# --- Robust Path Configuration ---
+# This ensures it finds the CSVs even if you run it from the root folder
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TRAIN_PATH = os.path.join(BASE_DIR, "UNSW_NB15_training-set.csv")
+TEST_PATH = os.path.join(BASE_DIR, "UNSW_NB15_testing-set.csv")
+MODEL_SAVE_PATH = os.path.join(BASE_DIR, "model.pkl")
 
 # Load data
-train_df = pd.read_csv("UNSW_NB15_training-set.csv")
-test_df = pd.read_csv("UNSW_NB15_testing-set.csv")
+print(f"📂 Loading data from {BASE_DIR}...")
+try:
+    train_df = pd.read_csv(TRAIN_PATH)
+    test_df = pd.read_csv(TEST_PATH)
+except FileNotFoundError as e:
+    print(f"❌ Error: CSV files not found in {BASE_DIR}. Check your file names!")
+    raise e
 
 def preprocess(df):
+    """
+    Standardizes the raw UNSW-NB15 data into the 5 features 
+    ZETROS Hub uses for live detection.
+    """
     df = df.copy()
 
+    # Avoid division by zero in duration
     df['dur'] = df['dur'].replace(0, 0.0001)
 
     total_packets = df['spkts'] + df['dpkts']
@@ -33,6 +53,7 @@ def preprocess(df):
         'label'
     ]]
 
+print("🧹 Preprocessing data...")
 train_df = preprocess(train_df)
 test_df = preprocess(test_df)
 
@@ -55,17 +76,20 @@ best_accuracy = 0
 print("\n=== MODEL COMPARISON ===\n")
 
 for name, model in models.items():
+    print(f"🏋️ Training {name}...")
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
 
     acc = accuracy_score(y_test, y_pred)
-    print(f"{name} Accuracy: {acc:.4f}")
+    print(f"📊 {name} Accuracy: {acc:.4f}")
 
     if acc > best_accuracy:
         best_accuracy = acc
         best_model = model
 
-print("\nBest Model Selected ✅")
+print(f"\n✅ Best Model Selected: {type(best_model).__name__} with {best_accuracy:.4f} accuracy")
 
-# Save best model
-joblib.dump(best_model, "model.pkl")
+# Save best model to the ml_sahil folder
+print(f"💾 Saving model to {MODEL_SAVE_PATH}...")
+joblib.dump(best_model, MODEL_SAVE_PATH)
+print("🏁 Done!")

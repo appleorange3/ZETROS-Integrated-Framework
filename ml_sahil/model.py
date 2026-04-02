@@ -1,7 +1,14 @@
 import pandas as pd
 import joblib
 
-model = joblib.load("ml/model.pkl")
+import os
+import joblib
+
+# This finds the actual folder where model.py is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "model.pkl")
+
+model = joblib.load(MODEL_PATH) # ✅ Works regardless of where you run the Hub from
 
 def predict(features):
     columns = [

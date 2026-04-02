@@ -25,25 +25,26 @@ class ConnectionHandler:
         # 1. Decrypt the request
         raw = rsa_decrypt(self.private_key, encrypted_payload)
         data = decode_message(raw)
+        
         client_id = data['client_id']
-        r_C2 = data['r_C2']
+        # 🔑 FIXED: Changed from 'r_C2' to 'nonce' to match Client/Hub update
+        incoming_nonce = data['nonce'] 
 
-        # 2. Verify device exists in the "Birth Certificate" file
+        # 2. Verify device exists in the database
         db = self._load_db()
         if client_id not in db:
             raise Exception(f"Access Denied: Device {client_id} not recognized.")
 
         # 3. Pick a RANDOM challenge index from the stored set
-        # This prevents 'Replay Attacks' because the question changes every time.
         stored_challenges = db[client_id]["C_r"]
         idx = random.randint(0, len(stored_challenges) - 1)
         selected_challenge = stored_challenges[idx]
 
-        # 4. Save the challenge index to verify the answer later
+        # 4. Save the session data to verify the answer in CONN3
         r_S2 = generate_nonce()
         self.sessions[client_id] = {
             "expected_idx": idx,
-            "r_C2": r_C2,
+            "nonce": incoming_nonce, # 🔑 Saved as 'nonce'
             "r_S2": r_S2
         }
 
@@ -57,17 +58,19 @@ class ConnectionHandler:
         """
         Phase 2, Step 3: Verifies the hardware response against the database.
         """
-        # 1. Decrypt the response (RSA encrypted by client)
+        # 1. Decrypt the response
         raw = rsa_decrypt(self.private_key, encrypted_payload)
         data = decode_message(raw)
         
         received_response_hex = data['response']
-        received_r_C2 = data['r_C2']
+        # 🔑 FIXED: Changed from 'r_C2' to 'nonce'
+        received_nonce = data['nonce'] 
 
-        # 2. Identify which session this packet belongs to using the nonce r_C2
+        # 2. Identify which session this packet belongs to using the nonce
         target_cid = None 
         for cid, session in self.sessions.items():
-            if session['r_C2'] == received_r_C2:
+            # 🔑 FIXED: Checking 'nonce' instead of 'r_C2'
+            if session['nonce'] == received_nonce:
                 target_cid = cid
                 break
         
@@ -75,14 +78,12 @@ class ConnectionHandler:
             print("⚠️ No active session matches this nonce. Possible timeout or hack attempt.")
             return False, None
 
-        # 3. Retrieve the stored "DNA" (The SHA-256 fingerprint from Phase 1)
+        # 3. Retrieve the stored "DNA" fingerprint
         session = self.sessions[target_cid]
         db = self._load_db()
         stored_hash = db[target_cid]["R_r"][session["expected_idx"]]
         
-        # 4. VERIFICATION:
-        # The client sent a Hex string. We must convert it back to BYTES 
-        # so the SHA-256 hash matches the one we saved during registration.
+        # 4. VERIFICATION
         response_bytes = bytes.fromhex(received_response_hex)
         calculated_hash = hashlib.sha256(response_bytes).hexdigest()
 

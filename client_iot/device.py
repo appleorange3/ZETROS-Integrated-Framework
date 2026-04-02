@@ -2,6 +2,7 @@ import os
 import socket
 import json
 import sys
+import time
 from common.puf import PUF
 from client_iot.register_client import RegistrationClient
 from client_iot.connection_client import ConnectionClient
@@ -14,62 +15,63 @@ SERVER_ADDR = ("127.0.0.1", 5000)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 def run_connection_phase(client_id, puf):
-    """Handles the Phase 2 Authentication handshake."""
+    """Handles the Phase 2 Authentication handshake (Challenge-Response)."""
     print(f"🚀 [PHASE 2] Starting Connection Handshake for: {client_id}")
     
+    # Initialize the Connection Client
     conn_client = ConnectionClient(puf, client_id, SERVER_PUBLIC_KEY)
 
-    # ---------------- CONN 1 ----------------
+    # ---------------- CONN 1: Request ----------------
+    # This now sends {client_id, nonce, timestamp} encrypted via RSA
     msg1 = conn_client.msg1_connect()
     sock.sendto(msg1, SERVER_ADDR)
-    print("📤 CONN1 sent (Connection Request)")
+    print("📤 CONN1 sent (Connection Request with Timestamp)")
 
-    # ---------------- CONN 2 ----------------
+    # ---------------- CONN 2: Challenge ----------------
     msg2_raw, _ = sock.recvfrom(4096)
     if not msg2_raw.startswith(b"CONN2|"):
         print("❌ Unexpected message received instead of CONN2")
         return
 
-    print("📩 CONN2 received (Challenge Index)")
+    print("📩 CONN2 received (Random Challenge from Hub)")
     
-    # ---------------- CONN 3 ----------------
-    # solve using PUF
+    # ---------------- CONN 3: Response ----------------
+    # Solves the challenge using physical PUF hardware
     msg3 = conn_client.process_msg2_challenge(msg2_raw[6:]) 
     sock.sendto(msg3, SERVER_ADDR)
     print("📤 CONN3 sent (PUF Hardware Response)")
 
-    # ---------------- CONN 4 ----------------
+    # ---------------- CONN 4: Verdict ----------------
     msg4_raw, _ = sock.recvfrom(4096)
     if msg4_raw.startswith(b"CONN4|SUCCESS"):
         print("✅ [AUTH SUCCESS] Server verified physical hardware. Connection established.")
     else:
-        print("🚫 [AUTH FAILED] Server rejected the hardware fingerprint.")
+        print("🚫 [AUTH FAILED] Server rejected the hardware fingerprint or Replay detected.")
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
+    # Check if we have already registered (Vault exists)
     if os.path.exists(VAULT_PATH):
-        print("🤖 Known Device detected. Loading Vault...")
+        print("🤖 Known Device detected. Loading Identity Vault...")
         with open(VAULT_PATH, "r") as f:
             vault = json.load(f)
         
-        # Initialize PUF with the physical seed from the vault
+        # Recreate the PUF using the saved physical seed
         puf = PUF("known_device", seed=bytes.fromhex(vault['puf_seed']))
         client_id = vault['client_id']
         
         run_connection_phase(client_id, puf)
-        
-        # --- THE FIX: Exit after Phase 2 attempt ---
         print("🏁 Phase 2 session complete. Exiting.")
         sys.exit(0)
 
     else:
-        print("🆕 No Vault found. Starting Phase 1 Registration...")
+        print("🆕 No Vault found. Starting Phase 1 (ZETROS Registration)...")
         
         # 1. Initialize for Phase 1
-        puf = PUF("sensor_001")
+        puf = PUF("sensor_001") # Generates a new unique seed
         client = RegistrationClient(puf, SERVER_PUBLIC_KEY, CA_PUBLIC_KEY)
 
-        print("[*] Starting ZETROS registration...")
+        print("[*] Initiating 9-step registration flow...")
 
         # ---------------- MSG1 ----------------
         sock.sendto(client.msg1_hello(), SERVER_ADDR)
@@ -78,36 +80,35 @@ if __name__ == "__main__":
         msg2, _ = sock.recvfrom(4096)
         cert = client.process_msg2(msg2)
 
-        # ---------------- MSG3 & MSG4 (CA Simulation) ----------------
+        # ---------------- MSG3 & MSG4 (CA Verification) ----------------
         msg3 = client.msg3_ca_request(cert)
+        # Simulated CA service call
         from authority_ca.ca_service import handle_verification_request
         msg4 = handle_verification_request(msg3)
         client.process_msg4(msg4)
 
-        # ---------------- MSG5 ----------------
+        # ---------------- MSG5 (Key Exchange) ----------------
         sock.sendto(client.msg5_key_exchange(), SERVER_ADDR)
 
         # ---------------- MSG6 ----------------
         msg6, _ = sock.recvfrom(4096)
         C_r = client.process_msg6(msg6)
 
-        # ---------------- MSG7 ----------------
+        # ---------------- MSG7 (PUF Fingerprinting) ----------------
         sock.sendto(client.msg7_response(C_r), SERVER_ADDR)
 
-        # ---------------- MSG8 ----------------
+        # ---------------- MSG8 (ID Assignment) ----------------
         msg8_raw, _ = sock.recvfrom(4096)
-        print("📩 MSG8 received")
-
         if msg8_raw.startswith(b"MSG8|"):
             r_S1 = client.process_msg8(msg8_raw[5:]) 
-            print(f"[✔] Assigned ID: {client.client_id}")
+            print(f"[✔] Assigned Client ID: {client.client_id}")
 
-            # ---------------- MSG9 ----------------
+            # ---------------- MSG9 (Finish) ----------------
             msg9 = client.msg9_finish(r_S1)
             sock.sendto(msg9, SERVER_ADDR)
-            print("📤 MSG9 sent")
+            print("📤 MSG9 sent (Registration Complete)")
 
-            # --- SAVE VAULT FOR FUTURE USE ---
+            # --- SAVE VAULT ---
             vault_data = {
                 "client_id": client.client_id,
                 "puf_seed": puf._seed.hex() 
@@ -115,6 +116,6 @@ if __name__ == "__main__":
             with open(VAULT_PATH, "w") as f:
                 json.dump(vault_data, f, indent=4)
 
-            print("📂 Device Vault created. I now remember my identity for Phase 2!")
+            print("📂 Device Vault created. I now have a permanent identity for Phase 2!")
         else:
-            print("❌ Error: Registration failed at MSG8 stage.")
+            print("❌ Error: Registration failed. Server did not send MSG8.")
